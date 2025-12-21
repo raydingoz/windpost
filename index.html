@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Windpost – Sail/Wind Physics v11</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <canvas id="hud"></canvas>
+
+  <div id="overlay">
+    <div class="panel">
+      <div class="title">Windpost – Sail/Wind Physics v11</div>
+      <div class="subtitle">Rebuilt boat model + rebuilt sail/wind/rudder interaction (consistent axes)</div>
+      <div class="hr"></div>
+      <div class="controls">
+        <div><span class="k">A/D</span> rudder &nbsp; <span class="k">Q/E</span> trim sail &nbsp; <span class="k">Z/X</span> sail in/out (furl)</div>
+        <div><span class="k">Mouse</span> orbit camera &nbsp; <span class="k">W/S</span> zoom &nbsp; <span class="k">M</span> engine on/off &nbsp; <span class="k">T/G</span> throttle</div>
+        <div><span class="k">R</span> reset &nbsp; <span class="k">H</span> toggle HUD</div>
+      </div>
+      <div class="small">
+        Heading convention: bow points +Z when heading = 0°. Rudder changes yaw; strong lateral resistance keeps track aligned.
+      </div>
+    </div>
+  </div>
+
+  <div id="bottomHud">
+    <div class="hud-row">
+      <div class="hud-block">
+        <div class="hud-label">Rudder</div>
+        <div class="gauge"><div class="gauge-center"></div><div class="gauge-needle" id="rudderNeedle"></div></div>
+        <div class="hud-value" id="rudderValue">0°</div>
+      </div>
+      <div class="hud-block">
+        <div class="hud-label">Sail trim</div>
+        <div class="gauge"><div class="gauge-center"></div><div class="gauge-needle" id="sailNeedle"></div></div>
+        <div class="hud-value" id="sailValue">0°</div>
+      </div>
+      <div class="hud-block">
+        <div class="hud-label">True wind</div>
+        <div class="mini"><div class="arrow" id="trueWindArrow"></div></div>
+        <div class="hud-value" id="trueWindValue">0.0 m/s</div>
+      </div>
+      <div class="hud-block">
+        <div class="hud-label">App wind</div>
+        <div class="mini"><div class="arrow" id="appWindArrow"></div></div>
+        <div class="hud-value" id="appWindValue">0.0 m/s</div>
+      </div>
+      
+      <div class="hud-block">
+        <div class="hud-label">Sail</div>
+        <div class="mini"><div class="bar" id="sailBar"><div class="barFill" id="sailFill"></div></div></div>
+        <div class="hud-value" id="sailStateValue">100%</div>
+      </div>
+      <div class="hud-block">
+        <div class="hud-label">Engine</div>
+        <div class="mini"><div class="bar" id="throttleBar"><div class="barFill" id="throttleFill"></div></div></div>
+        <div class="hud-value" id="engineValue">OFF</div>
+      </div>
+<div class="hud-block wide">
+        <div class="hud-label">Speed</div>
+        <div class="speed" id="speedValue">0.00 m/s</div>
+        <div class="hud-sub" id="headingValue">HDG 000°</div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="./main.js"></script>
+</body>
+</html>
