@@ -39,6 +39,8 @@ const hudEls = {
   sailFill: document.getElementById('sailFill'),
   engineValue: document.getElementById('engineValue'),
   throttleFill: document.getElementById('throttleFill'),
+  windEffValue: document.getElementById('windEffValue'),
+  windEffFill: document.getElementById('windEffFill'),
 };
 
 // Scene
@@ -134,7 +136,7 @@ scene.add(windArrow);
 
 // Water surface
 const params = { internalScale: 0.34, waterSize: 900 };
-const waterGeo = new THREE.PlaneGeometry(params.waterSize, params.waterSize, 180, 180);
+const waterGeo = new THREE.PlaneGeometry(params.waterSize, params.waterSize, 80, 80);
 waterGeo.rotateX(-Math.PI / 2);
 
 function makeWaterTexture() {
@@ -167,6 +169,8 @@ const waterNormal = texLoader.load('./assets/ocean_normal.png');
 waterNormal.wrapS = THREE.RepeatWrapping;
 waterNormal.wrapT = THREE.RepeatWrapping;
 waterNormal.repeat.set(18, 18);
+waterNormal.magFilter = THREE.NearestFilter;
+waterNormal.minFilter = THREE.NearestFilter;
 // Normal maps must stay in linear/no colorspace
 waterNormal.colorSpace = THREE.NoColorSpace;
 waterNormal.anisotropy = renderer.capabilities.getMaxAnisotropy();
@@ -179,7 +183,8 @@ const waterMat = new THREE.MeshPhysicalMaterial({
   clearcoat: 1.0,
   clearcoatRoughness: 0.08,
   normalMap: waterNormal,
-  normalScale: new THREE.Vector2(0.70, 0.70),
+  normalScale: new THREE.Vector2(0.45, 0.45),
+  flatShading: true,
 });
 const water = new THREE.Mesh(waterGeo, waterMat);
 scene.add(water);
@@ -190,7 +195,9 @@ function waterHeight(x, z, t) {
   const w1 = Math.sin((x * 0.040) + (t * 0.75)) * 0.78;
   const w2 = Math.sin((z * 0.038) - (t * 0.68)) * 0.62;
   const w3 = Math.sin(((x + z) * 0.028) + (t * 1.05)) * 0.45;
-  return a * (w1 + w2 + w3);
+  const h = a * (w1 + w2 + w3);
+  const step = 0.035;
+  return Math.round(h / step) * step;
 }
 function updateWaterMesh(t) {
   const pos = waterGeo.attributes.position;
@@ -566,7 +573,7 @@ function stepBoat(dt, t) {
   const rudderRate = THREE.MathUtils.degToRad(85);
   const rudderReturn = THREE.MathUtils.degToRad(60);
 
-  const rudInput = (input.right ? 1 : 0) - (input.left ? 1 : 0);
+  const rudInput = (input.left ? 1 : 0) - (input.right ? 1 : 0);
   if (rudInput !== 0) boat.rudder += rudInput * rudderRate * dt;
   else {
     const sign = Math.sign(boat.rudder);
@@ -643,17 +650,41 @@ function stepBoat(dt, t) {
   // Keep it sim-cade stable.
   const q = appSp * appSp;
 
-  // Drive magnitude (forward thrust). Scales with apparent wind^2, trim and point-of-sail base.
-  const driveMag = q * 2.0 * basePower * trimEff * boat.sailDeploy;
+  // Sail force from apparent wind (lift + drag), with soft stall.
+  const appF = appFrom.dot(fwd);
+  const appR = appFrom.dot(right);
+  const appAng = Math.atan2(appR, appF);
+  const aoa = wrapAngle(appAng - boat.sail);
+  const absAoa = Math.abs(aoa);
+  const stall = clamp(1 - (absAoa / THREE.MathUtils.degToRad(80)), 0.0, 1.0);
+  const liftCoeff = Math.sin(2 * absAoa) * stall;
+  const dragCoeff = 0.20 + 1.60 * Math.pow(Math.sin(absAoa), 2);
 
-  // Forward thrust, plus a smaller side force that keel/hydro resists (creates "lift-like" feel)
-  const sideSign = Math.sign(twa || 1);
-  const sideFactor = clamp(Math.sin(absTWA), 0, 1);
-  const sideMag = driveMag * 0.30 * sideFactor * (d < 150 ? 1.0 : 0.45);
+  const appDir = appFrom.clone().multiplyScalar(1 / appSp);
+  const dragDir = appDir.clone().multiplyScalar(-1);
+  const baseLift = new THREE.Vector3()
+    .addScaledVector(fwd, -appR / appSp)
+    .addScaledVector(right, appF / appSp);
+  const liftDir = baseLift.multiplyScalar(Math.sign(aoa || 1));
 
+  const sailPower = 1.35 * basePower * trimEff * boat.sailDeploy;
   const F_sail = new THREE.Vector3()
-    .addScaledVector(fwd, driveMag)
-    .addScaledVector(right, sideMag * sideSign);
+    .addScaledVector(dragDir, q * dragCoeff * sailPower)
+    .addScaledVector(liftDir, q * liftCoeff * sailPower);
+
+  const jibTarget = clamp(targetSail * 0.65, 12, 60);
+  const jibSign = Math.sign(twa || 1);
+  const jibTrim = clamp(THREE.MathUtils.degToRad(jibTarget) * jibSign, -Math.PI * 0.4, Math.PI * 0.4);
+  const jibAoa = wrapAngle(appAng - jibTrim);
+  const jibAbsAoa = Math.abs(jibAoa);
+  const jibStall = clamp(1 - (jibAbsAoa / THREE.MathUtils.degToRad(85)), 0.0, 1.0);
+  const jibLift = Math.sin(2 * jibAbsAoa) * jibStall;
+  const jibDrag = 0.24 + 1.45 * Math.pow(Math.sin(jibAbsAoa), 2);
+  const jibLiftDir = baseLift.clone().multiplyScalar(Math.sign(jibAoa || 1));
+  const jibPower = sailPower * 0.55;
+  const F_jib = new THREE.Vector3()
+    .addScaledVector(dragDir, q * jibDrag * jibPower)
+    .addScaledVector(jibLiftDir, q * jibLift * jibPower);
 
   // Engine thrust (motorlu seyir): forward push independent of wind
   const enginePower = 320.0; // N-ish (sim-cade)
@@ -663,8 +694,11 @@ function stepBoat(dt, t) {
   const vF = boat.vel.dot(fwd);
   const vR = boat.vel.dot(right);
 
+  const engineGrip = boat.engineOn ? (1.0 + boat.throttle * 0.85) : 1.0;
+  const speedF = Math.abs(vF);
   const kF_lin = 18.0, kF_quad = 10.5;   // forward drag
-  const kR_lin = 140.0, kR_quad = 85.0;  // lateral (keel) drag
+  const kR_lin = (140.0 + speedF * 8.0) * engineGrip;
+  const kR_quad = (85.0 + speedF * 6.0) * engineGrip;  // lateral (keel) drag
 
   const F_hydro = new THREE.Vector3()
     .addScaledVector(fwd,  -(kF_lin * vF + kF_quad * vF * Math.abs(vF)))
@@ -676,7 +710,7 @@ function stepBoat(dt, t) {
   const F_rudder = right.clone().multiplyScalar(rudSide);
 
   // Total force
-  const F = new THREE.Vector3().add(F_sail).add(F_engine).add(F_hydro).add(F_rudder);
+  const F = new THREE.Vector3().add(F_sail).add(F_jib).add(F_engine).add(F_hydro).add(F_rudder);
 
   // Integrate linear
   const acc = F.multiplyScalar(1 / boat.mass);
@@ -687,6 +721,12 @@ function stepBoat(dt, t) {
   const lever = 2.55;
   let torque = boat.rudder * flowWater * flowWater * 420.0;
   torque += (F_sail.dot(right)) * 0.10;              // weather-helm-ish
+  torque += -vR * (12.0 + 8.0 * engineGrip);
+  if (boat.vel.lengthSq() > 0.05) {
+    const velHeading = Math.atan2(boat.vel.x, boat.vel.z);
+    const slipAngle = wrapAngle(velHeading - boat.heading);
+    torque += -slipAngle * (45.0 + flowWater * 22.0);
+  }
   torque += -boat.yawRate * (3.4 + flowWater * 0.22);
 
   const yawAcc = torque / boat.Iz;
@@ -697,7 +737,7 @@ function stepBoat(dt, t) {
 
   // Visual: sail follows trim (negative sign keeps "positive trim" intuitive)
   sailPivot.rotation.y = -boat.sail;
-  jibPivot.rotation.y = -boat.sail * 0.85;
+  jibPivot.rotation.y = -jibTrim;
 
   // Visual: luffing when badly trimmed (trimEff low) in upwind/reach
   stepBoat._flap = (stepBoat._flap || 0) + dt * (6.0 + appSp * 0.5);
@@ -706,9 +746,6 @@ function stepBoat(dt, t) {
   sail.rotation.z = luff * 0.12 * Math.sin(stepBoat._flap * 7.0) * sideSign;
 
   // Streamer: align to apparent wind FROM in boat frame
-  const appF = appFrom.dot(fwd);
-  const appR = appFrom.dot(right);
-  const appAng = Math.atan2(appR, appF);
   streamer.rotation.y = appAng + Math.PI * 0.5;
 
   // Rudder visual
@@ -717,7 +754,10 @@ function stepBoat(dt, t) {
   // For HUD: alpha is "trim error" proxy now
   const alpha = THREE.MathUtils.degToRad(Math.abs(sailAbs - targetSail));
 
-  return { tw, aw, flow: appFrom, speed: boat.vel.length(), alpha, twa, flowAng: appAng, fwd, right, posEff: (basePower * trimEff), sailDeploy: boat.sailDeploy, engineOn: boat.engineOn, throttle: boat.throttle };
+  const windEff = clamp(basePower * trimEff * boat.sailDeploy, 0.0, 1.0);
+  const heel = clamp((-appR / appSp) * (0.10 + windEff * 0.18), -0.22, 0.22);
+
+  return { tw, aw, flow: appFrom, speed: boat.vel.length(), alpha, twa, flowAng: appAng, fwd, right, posEff: windEff, sailDeploy: boat.sailDeploy, engineOn: boat.engineOn, throttle: boat.throttle, heel, windEff };
 }
 
 // Camera follow
@@ -771,6 +811,11 @@ function updateBottomHud(info) {
   if (hudEls.engineValue) {
     hudEls.engineValue.textContent = (info.engineOn ? `ON ${Math.round((info.throttle ?? 0)*100)}%` : 'OFF');
     if (hudEls.throttleFill) hudEls.throttleFill.style.width = `${Math.round((info.throttle ?? 0)*100)}%`;
+  }
+  if (hudEls.windEffValue) {
+    const pct = Math.round((info.windEff ?? 0) * 100);
+    hudEls.windEffValue.textContent = `${pct}%`;
+    if (hudEls.windEffFill) hudEls.windEffFill.style.width = `${pct}%`;
   }
 }
 
@@ -930,7 +975,7 @@ function animate() {
   const rollWave = (waterHeight(boat.pos.x + 1.3, boat.pos.z, now) - waterHeight(boat.pos.x - 1.3, boat.pos.z, now));
   const pitchWave = (waterHeight(boat.pos.x, boat.pos.z + 1.8, now) - waterHeight(boat.pos.x, boat.pos.z - 1.8, now));
 
-  const targetRoll = clamp((-vR * 0.04) + rollWave * 0.70, -0.16, 0.16);
+  const targetRoll = clamp((-vR * 0.04) + rollWave * 0.70 + info.heel, -0.22, 0.22);
   const targetPitch = clamp((-vF * 0.014) + pitchWave * 0.55, -0.12, 0.12);
   const smooth = 1.0 - Math.pow(0.0012, dt);
   boatGroup.rotation.z = THREE.MathUtils.lerp(boatGroup.rotation.z, targetRoll, smooth);
