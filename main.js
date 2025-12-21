@@ -743,7 +743,8 @@ function stepBoat(dt, t) {
   stepBoat._flap = (stepBoat._flap || 0) + dt * (6.0 + appSp * 0.5);
   const luff = clamp(1.0 - trimEff, 0.0, 1.0) * (d < 120 ? 1.0 : 0.5);
   sail.rotation.x = 0.0;
-  sail.rotation.z = luff * 0.12 * Math.sin(stepBoat._flap * 7.0) * sideSign;
+  const luffSign = Math.sign(twa || 1);
+  sail.rotation.z = luff * 0.12 * Math.sin(stepBoat._flap * 7.0) * luffSign;
 
   // Streamer: align to apparent wind FROM in boat frame
   streamer.rotation.y = appAng + Math.PI * 0.5;
